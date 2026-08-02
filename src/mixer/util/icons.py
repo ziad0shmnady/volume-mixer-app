@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from mixer.models.audio import StreamInfo
 from mixer.util.stream_names import BINARY_ICON_ALIASES
@@ -15,9 +16,19 @@ _GENERIC_CANDIDATES = (
     _FALLBACK,
 )
 
+_DESKTOP_DIRS = (
+    Path("/var/lib/snapd/desktop/applications"),
+    Path("/usr/share/applications"),
+    Path("/var/lib/flatpak/exports/share/applications"),
+    Path.home() / ".local/share/flatpak/exports/share/applications",
+    Path.home() / ".local/share/applications",
+)
+
+_desktop_icon_cache: dict[str, str] | None = None
+
 
 def candidate_icon_names(stream: StreamInfo) -> list[str]:
-    """Ordered icon name candidates for a playback stream."""
+    """Ordered icon theme name candidates for a playback stream."""
     names: list[str] = []
 
     def _add(value: str | None) -> None:
@@ -37,6 +48,10 @@ def candidate_icon_names(stream: StreamInfo) -> list[str]:
     for alias in BINARY_ICON_ALIASES.get(binary, ()):
         _add(alias)
 
+    if stream.snap_id:
+        _add(stream.snap_id)
+        _add(f"{stream.snap_id}_{stream.snap_id}")
+
     display_key = stream.name.casefold().replace(" ", "-")
     for alias in BINARY_ICON_ALIASES.get(display_key, ()):
         _add(alias)
@@ -45,6 +60,100 @@ def candidate_icon_names(stream: StreamInfo) -> list[str]:
     for generic in _GENERIC_CANDIDATES:
         _add(generic)
     return names
+
+
+def _snap_icon_path(snap_id: str) -> str | None:
+    snap = snap_id.strip().casefold()
+    if not snap:
+        return None
+    candidates = (
+        Path(f"/snap/{snap}/current/meta/gui/icon.png"),
+        Path(f"/snap/{snap}/current/usr/share/pixmaps/{snap}.png"),
+        Path(f"/snap/{snap}/current/usr/share/pixmaps/{snap_id}.png"),
+    )
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def _parse_desktop_icon(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("Icon="):
+            icon = line.split("=", 1)[1].strip()
+            return icon or None
+    return None
+
+
+def _desktop_icon_index() -> dict[str, str]:
+    global _desktop_icon_cache
+    if _desktop_icon_cache is not None:
+        return _desktop_icon_cache
+
+    index: dict[str, str] = {}
+    for desktop_dir in _DESKTOP_DIRS:
+        if not desktop_dir.is_dir():
+            continue
+        try:
+            entries = list(desktop_dir.glob("*.desktop"))
+        except OSError:
+            continue
+        for desktop_path in entries:
+            icon = _parse_desktop_icon(desktop_path)
+            if not icon:
+                continue
+            stem = desktop_path.stem.casefold()
+            index.setdefault(stem, icon)
+            try:
+                text = desktop_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                if line.startswith("X-SnapAppName="):
+                    index.setdefault(line.split("=", 1)[1].strip().casefold(), icon)
+                elif line.startswith("StartupWMClass="):
+                    index.setdefault(line.split("=", 1)[1].strip().casefold(), icon)
+    _desktop_icon_cache = index
+    return index
+
+
+def _resolve_desktop_icon(*keys: str | None) -> str | None:
+    index = _desktop_icon_index()
+    for key in keys:
+        if not key:
+            continue
+        icon = index.get(key.strip().casefold())
+        if icon:
+            if Path(icon).is_file():
+                return icon
+            return icon
+    return None
+
+
+def resolve_icon_file(stream: StreamInfo) -> str | None:
+    """Return an absolute icon file path when theme icons are unavailable."""
+    if stream.snap_id:
+        snap_icon = _snap_icon_path(stream.snap_id)
+        if snap_icon:
+            return snap_icon
+
+    binary = (stream.process_binary or "").split("/")[-1]
+    desktop_icon = _resolve_desktop_icon(
+        stream.snap_id,
+        stream.application_id,
+        binary,
+        binary.casefold(),
+        stream.name,
+        stream.name.casefold().replace(" ", "-"),
+        f"{stream.snap_id}_{stream.snap_id}" if stream.snap_id else None,
+    )
+    if desktop_icon and Path(desktop_icon).is_file():
+        return desktop_icon
+    return None
 
 
 def resolve_icon_name(
@@ -56,13 +165,27 @@ def resolve_icon_name(
     ``has_icon`` is optional: ``Callable[[str], bool]``. When omitted, the
     first candidate is returned (useful in tests without GTK).
     """
+    icon_file = resolve_icon_file(stream)
+    if icon_file:
+        return icon_file
+
     candidates = candidate_icon_names(stream)
     if has_icon is None:
         return candidates[0]
     for name in candidates:
+        if Path(name).is_file():
+            return name
         try:
             if has_icon(name):
                 return name
         except Exception:  # noqa: BLE001
             continue
     return _FALLBACK
+
+
+def apply_icon(image: object, icon: str) -> None:
+    """Set a Gtk.Image from a theme name or absolute file path."""
+    if Path(icon).is_file():
+        image.set_from_file(icon)  # type: ignore[attr-defined]
+    else:
+        image.set_from_icon_name(icon)  # type: ignore[attr-defined]

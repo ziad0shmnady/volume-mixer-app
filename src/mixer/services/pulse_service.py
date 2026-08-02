@@ -316,6 +316,7 @@ class PulseService:
                     corked=bool(getattr(si, "corked", False)),
                     application_id=application_id,
                     process_binary=process_binary,
+                    snap_id=snap_id,
                 )
             )
 

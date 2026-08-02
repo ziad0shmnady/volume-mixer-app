@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from mixer.models.audio import DeviceInfo, StreamInfo, VolumeMath
-from mixer.util.icons import resolve_icon_name
+from mixer.util.icons import apply_icon, resolve_icon_name
 
 MuteHandler = Callable[[bool], None]
 VolumeHandler = Callable[[float], None]
@@ -53,7 +53,8 @@ class ChannelRow(Adw.ActionRow):
         self._current_sink_index = current_sink_index
         self._compact = compact
 
-        self._icon = Gtk.Image.new_from_icon_name(icon_name)
+        self._icon = Gtk.Image()
+        apply_icon(self._icon, icon_name)
         self._icon.set_pixel_size(22)
         self.add_prefix(self._icon)
 
@@ -129,7 +130,7 @@ class ChannelRow(Adw.ActionRow):
             if subtitle is not None:
                 self.set_subtitle(subtitle)
             if icon_name is not None:
-                self._icon.set_from_icon_name(icon_name)
+                apply_icon(self._icon, icon_name)
             if max_volume is not None and max_volume != self._max_volume:
                 self._max_volume = max_volume
                 self._scale.set_range(0.0, max_volume)

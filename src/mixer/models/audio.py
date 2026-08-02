@@ -31,6 +31,7 @@ class StreamInfo:
     corked: bool = False
     application_id: str | None = None
     process_binary: str | None = None
+    snap_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
