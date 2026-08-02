@@ -8,7 +8,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gdk, Gtk  # noqa: E402
+from gi.repository import Gtk  # noqa: E402
 
 AccelChangedHandler = Callable[[str], None]
 
@@ -16,7 +16,7 @@ AccelChangedHandler = Callable[[str], None]
 def accel_to_label(accel: str) -> str:
     """Convert a GTK accelerator name to a human-readable label."""
     if not accel:
-        return "Disabled"
+        return "None"
     ok, keyval, mods = Gtk.accelerator_parse(accel)
     if not ok or not keyval:
         return accel
@@ -32,7 +32,7 @@ def is_valid_accel(accel: str) -> bool:
 
 
 class ShortcutButton(Gtk.Button):
-    """Button that records a new accelerator when activated."""
+    """Compact chip that shows the current shortcut and captures a new one on click."""
 
     def __init__(
         self,
@@ -49,6 +49,22 @@ class ShortcutButton(Gtk.Button):
         self._on_changed = on_changed
         self._capturing = False
         self._controller: Gtk.EventControllerKey | None = None
+
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        content.set_valign(Gtk.Align.CENTER)
+        self.set_child(content)
+
+        self._icon = Gtk.Image.new_from_icon_name("input-keyboard-symbolic")
+        self._icon.set_pixel_size(14)
+        self._icon.add_css_class("dim-label")
+        content.append(self._icon)
+
+        self._keys = Gtk.Label()
+        self._keys.add_css_class("mixer-shortcut-keys")
+        self._keys.set_single_line_mode(True)
+        self._keys.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        content.append(self._keys)
+
         self._refresh_label()
         self._set_idle_tooltip()
         self.connect("clicked", self._on_clicked)
@@ -65,17 +81,22 @@ class ShortcutButton(Gtk.Button):
         self._set_idle_tooltip()
 
     def _set_idle_tooltip(self) -> None:
+        key = accel_to_label(self._accel)
         self.set_tooltip_text(
-            f"Keyboard shortcut for {self._action_label.lower()}. "
-            "Click to change it."
+            f"{self._action_label} shortcut: {key}\nClick to change"
         )
 
     def _refresh_label(self) -> None:
         if self._capturing:
-            self.set_label(f"{self._action_label}: press a key…")
+            self._keys.set_label("Press a key…")
+            self._keys.remove_css_class("disabled")
             return
-        key = accel_to_label(self._accel)
-        self.set_label(f"{self._action_label}: {key}")
+        if not self._accel:
+            self._keys.set_label("None")
+            self._keys.add_css_class("disabled")
+            return
+        self._keys.remove_css_class("disabled")
+        self._keys.set_label(accel_to_label(self._accel))
 
     def _on_clicked(self, *_args: object) -> None:
         if self._capturing:
@@ -109,10 +130,12 @@ class ShortcutButton(Gtk.Button):
         _controller: Gtk.EventControllerKey,
         keyval: int,
         _keycode: int,
-        state: Gdk.ModifierType,
+        state,
     ) -> bool:
         if not self._capturing:
             return False
+
+        from gi.repository import Gdk
 
         if keyval in (Gdk.KEY_Escape,):
             self._stop_capture(apply=False)
@@ -122,7 +145,6 @@ class ShortcutButton(Gtk.Button):
             self._commit("")
             return True
 
-        # Ignore modifier-only key presses.
         if keyval in (
             Gdk.KEY_Shift_L,
             Gdk.KEY_Shift_R,

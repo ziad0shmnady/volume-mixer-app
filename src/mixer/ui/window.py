@@ -146,14 +146,6 @@ class MixerWindow(Adw.ApplicationWindow):
         self._input_mute_btn.set_valign(Gtk.Align.CENTER)
         self._input_mute_btn.connect("clicked", self._on_input_mute_clicked)
         in_header.append(self._input_mute_btn)
-
-        self._shortcut_btn = ShortcutButton(
-            self._settings.mute_input_accel,
-            action_label="Mute/Unmute",
-            on_changed=self._on_mute_shortcut_changed,
-        )
-        self._shortcut_btn.set_valign(Gtk.Align.CENTER)
-        in_header.append(self._shortcut_btn)
         self._refresh_mute_tooltips()
         headers_row.append(in_header)
 
@@ -184,6 +176,17 @@ class MixerWindow(Adw.ApplicationWindow):
             on_selected=lambda name: self._vm.set_default_device("source", name),
         )
         self._input_group.add(self._source_picker)
+
+        shortcut_row = Adw.ActionRow()
+        shortcut_row.set_title("Mute shortcut")
+        shortcut_row.set_subtitle("Global mute/unmute")
+        self._shortcut_btn = ShortcutButton(
+            self._settings.mute_input_accel,
+            action_label="Mute/Unmute",
+            on_changed=self._on_mute_shortcut_changed,
+        )
+        shortcut_row.add_suffix(self._shortcut_btn)
+        self._input_group.add(shortcut_row)
 
         # Applications section (full width)
         apps_label = Gtk.Label(label="Applications", xalign=0.0)
