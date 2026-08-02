@@ -60,27 +60,7 @@ libpulse0
 
 ## Installation
 
-### Option 1 — `.deb` package (recommended)
-
-Download the latest `volume-mixer_*_all.deb` from the [Releases](../../releases) page, then:
-
-```bash
-sudo apt install ./volume-mixer_1.0.0_all.deb
-```
-
-Launch **Volume Mixer** from the app grid, or run:
-
-```bash
-mixer
-```
-
-To remove:
-
-```bash
-sudo apt remove volume-mixer
-```
-
-### Option 2 — Build the `.deb` yourself
+### Option 1 — Build the `.deb` yourself
 
 ```bash
 git clone https://github.com/ziad/mixer.git
@@ -90,7 +70,7 @@ cd mixer
 
 The package is written to `dist/volume-mixer_1.0.0_all.deb`.
 
-### Option 3 — Install from source (development)
+### Option 2 — Install from source (development)
 
 ```bash
 git clone https://github.com/ziad/mixer.git
