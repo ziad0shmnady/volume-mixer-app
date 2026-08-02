@@ -1,5 +1,7 @@
 # Volume Mixer
 
+![Volume Mixer main window](mixer.jpeg)
+
 A native **GTK 4 / libadwaita** volume mixer for Linux. Control output, input, and **per-application** audio levels from a clean desktop app or the system tray — built for **Ubuntu** and **PipeWire** (via the PulseAudio compatibility layer).
 
 > **Why this exists:** GNOME’s built-in sound settings only expose a few controls. Volume Mixer gives you a proper per-app mixer (like Windows or macOS), a tray popup for quick changes, and a global mute shortcut — without leaving your workflow.
