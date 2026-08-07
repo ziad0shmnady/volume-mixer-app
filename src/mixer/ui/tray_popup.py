@@ -13,6 +13,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from mixer.ui.channel_row import ChannelRow
+from mixer.ui.render_coalesce import CoalescedRenderer
 from mixer.util.logging import get_logger
 from mixer.viewmodel.mixer_viewmodel import MixerViewModel
 
@@ -124,6 +125,7 @@ class TrayPopup(Gtk.Window):
 
         outer.append(footer)
 
+        self._render_scheduler = CoalescedRenderer(self._render)
         self._vm.add_listener(self._on_viewmodel_changed)
 
         key_ctrl = Gtk.EventControllerKey()
@@ -201,13 +203,13 @@ class TrayPopup(Gtk.Window):
         _move_surface(self, int(popup_x), int(popup_y))
 
     def _on_viewmodel_changed(self, _vm: MixerViewModel) -> None:
-        GLib.idle_add(self._render)
+        self._render_scheduler.schedule()
 
-    def _render(self) -> bool:
+    def _render(self) -> None:
         if not self._vm.connected:
             self._empty.set_label("Audio service unavailable")
             self._empty.set_visible(True)
-            return False
+            return
 
         max_vol = self._vm.max_volume
         sinks = self._vm.sorted_sinks()
@@ -260,7 +262,6 @@ class TrayPopup(Gtk.Window):
         self._empty.set_visible(len(desired) == 0)
         if len(desired) == 0:
             self._empty.set_label("No applications are playing audio")
-        return False
 
 
 def _move_surface(window: Gtk.Window, x: int, y: int) -> None:

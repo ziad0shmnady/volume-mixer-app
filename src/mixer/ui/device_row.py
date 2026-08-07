@@ -31,6 +31,8 @@ class DevicePickerRow(Adw.ComboRow):
         self.set_title(title)
         self._on_selected = on_selected
         self._devices: tuple[DeviceInfo, ...] = ()
+        self._devices_signature: tuple[tuple[str, str, bool], ...] | None = None
+        self._selected_name: str | None = None
         self._updating = False
         self._string_list = Gtk.StringList.new([])
         self.set_model(self._string_list)
@@ -42,9 +44,15 @@ class DevicePickerRow(Adw.ComboRow):
         devices: tuple[DeviceInfo, ...],
         selected_name: str | None = None,
     ) -> None:
+        signature = tuple((device.name, device.description, device.is_default) for device in devices)
+        if signature == self._devices_signature and selected_name == self._selected_name:
+            return
+
         self._updating = True
         try:
             self._devices = devices
+            self._devices_signature = signature
+            self._selected_name = selected_name
             # Rebuild string list
             while self._string_list.get_n_items() > 0:
                 self._string_list.remove(self._string_list.get_n_items() - 1)

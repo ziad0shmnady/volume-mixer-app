@@ -25,6 +25,7 @@ _DESKTOP_DIRS = (
 )
 
 _desktop_icon_cache: dict[str, str] | None = None
+_icon_name_cache: dict[tuple[object, ...], str] = {}
 
 
 def candidate_icon_names(stream: StreamInfo) -> list[str]:
@@ -156,6 +157,17 @@ def resolve_icon_file(stream: StreamInfo) -> str | None:
     return None
 
 
+def _stream_icon_cache_key(stream: StreamInfo) -> tuple[object, ...]:
+    return (
+        stream.index,
+        stream.snap_id,
+        stream.process_binary,
+        stream.name,
+        stream.icon_name,
+        stream.application_id,
+    )
+
+
 def resolve_icon_name(
     stream: StreamInfo,
     has_icon: Callable[[str], bool] | None = None,
@@ -165,22 +177,35 @@ def resolve_icon_name(
     ``has_icon`` is optional: ``Callable[[str], bool]``. When omitted, the
     first candidate is returned (useful in tests without GTK).
     """
+    cache_key = _stream_icon_cache_key(stream)
+    if has_icon is not None:
+        cached = _icon_name_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     icon_file = resolve_icon_file(stream)
     if icon_file:
-        return icon_file
+        result = icon_file
+    else:
+        candidates = candidate_icon_names(stream)
+        if has_icon is None:
+            result = candidates[0]
+        else:
+            result = _FALLBACK
+            for name in candidates:
+                if Path(name).is_file():
+                    result = name
+                    break
+                try:
+                    if has_icon(name):
+                        result = name
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
 
-    candidates = candidate_icon_names(stream)
-    if has_icon is None:
-        return candidates[0]
-    for name in candidates:
-        if Path(name).is_file():
-            return name
-        try:
-            if has_icon(name):
-                return name
-        except Exception:  # noqa: BLE001
-            continue
-    return _FALLBACK
+    if has_icon is not None:
+        _icon_name_cache[cache_key] = result
+    return result
 
 
 def apply_icon(image: object, icon: str) -> None:

@@ -52,6 +52,9 @@ class ChannelRow(Adw.ActionRow):
         self._sinks = sinks
         self._current_sink_index = current_sink_index
         self._compact = compact
+        self._last_icon: str | None = icon_name
+        self._menu_sink_signature: tuple[tuple[int, str], ...] | None = None
+        self._menu_sink_index: int | None = None
 
         self._icon = Gtk.Image()
         apply_icon(self._icon, icon_name)
@@ -95,6 +98,10 @@ class ChannelRow(Adw.ActionRow):
             self._output_btn.set_tooltip_text("Move to output")
             self.add_suffix(self._output_btn)
             self._rebuild_output_menu()
+            self._menu_sink_signature = tuple(
+                (sink.index, sink.description) for sink in self._sinks
+            )
+            self._menu_sink_index = self._current_sink_index
 
         self.update_state(
             title=title,
@@ -127,9 +134,10 @@ class ChannelRow(Adw.ActionRow):
         try:
             if title is not None:
                 self.set_title(title)
-            if subtitle is not None:
+            if subtitle is not None and subtitle != self.get_subtitle():
                 self.set_subtitle(subtitle)
-            if icon_name is not None:
+            if icon_name is not None and icon_name != self._last_icon:
+                self._last_icon = icon_name
                 apply_icon(self._icon, icon_name)
             if max_volume is not None and max_volume != self._max_volume:
                 self._max_volume = max_volume
@@ -144,7 +152,7 @@ class ChannelRow(Adw.ActionRow):
                 self._sinks = sinks
             if current_sink_index is not None:
                 self._current_sink_index = current_sink_index
-            if self._output_btn is not None and (sinks is not None or current_sink_index is not None):
+            if self._output_btn is not None and self._sinks_changed():
                 self._rebuild_output_menu()
         finally:
             self._updating = False
@@ -221,6 +229,17 @@ class ChannelRow(Adw.ActionRow):
             self._sync_mute_icon(False, value)
         if self._on_volume is not None:
             self._on_volume(value)
+
+    def _sinks_changed(self) -> bool:
+        signature = tuple((sink.index, sink.description) for sink in self._sinks)
+        if (
+            signature == self._menu_sink_signature
+            and self._current_sink_index == self._menu_sink_index
+        ):
+            return False
+        self._menu_sink_signature = signature
+        self._menu_sink_index = self._current_sink_index
+        return True
 
     def _rebuild_output_menu(self) -> None:
         if self._output_btn is None:

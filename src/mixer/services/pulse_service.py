@@ -19,6 +19,12 @@ from mixer.services.backend import (
 from mixer.util.logging import get_logger
 from mixer.util.stream_names import is_transient_system_stream, resolve_stream_display_name
 
+import gi
+
+gi.require_version("GLib", "2.0")
+
+from gi.repository import GLib  # noqa: E402
+
 logger = get_logger("services.pulse")
 
 _MIN_BACKOFF = 0.5
@@ -227,6 +233,18 @@ class PulseService:
                     return stream
         return None
 
+    def _deliver_snapshot(self, callback: SnapshotCallback, snapshot: AudioSnapshot) -> None:
+        """Always invoke snapshot listeners on the GTK main loop."""
+
+        def _invoke() -> bool:
+            try:
+                callback(snapshot)
+            except Exception:  # noqa: BLE001
+                logger.exception("Snapshot callback failed")
+            return False
+
+        GLib.idle_add(_invoke)
+
     def _emit_disconnected(self) -> None:
         self._connected = False
         self._generation += 1
@@ -234,10 +252,7 @@ class PulseService:
         if callback is None:
             return
         snapshot = AudioSnapshot(connected=False, generation=self._generation)
-        try:
-            callback(snapshot)
-        except Exception:  # noqa: BLE001
-            logger.exception("Snapshot callback failed (disconnected)")
+        self._deliver_snapshot(callback, snapshot)
 
     def _emit_snapshot(self, pulse: Any) -> None:
         callback = self._on_snapshot
@@ -248,10 +263,7 @@ class PulseService:
         except Exception:  # noqa: BLE001
             logger.exception("Failed to build snapshot")
             return
-        try:
-            callback(snapshot)
-        except Exception:  # noqa: BLE001
-            logger.exception("Snapshot callback failed")
+        self._deliver_snapshot(callback, snapshot)
 
     def _build_snapshot(self, pulse: Any) -> AudioSnapshot:
         self._generation += 1

@@ -13,6 +13,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from mixer.ui.channel_row import ChannelRow
 from mixer.ui.device_row import DevicePickerRow
+from mixer.ui.render_coalesce import CoalescedRenderer
 from mixer.ui.shortcut_button import ShortcutButton, accel_to_label
 from mixer.util.logging import get_logger
 from mixer.util.settings import DEFAULT_MUTE_INPUT_ACCEL, MixerSettings
@@ -55,6 +56,7 @@ class MixerWindow(Adw.ApplicationWindow):
         self._build_chrome()
         self._load_css()
 
+        self._render_scheduler = CoalescedRenderer(self._render)
         self._vm.add_listener(self._on_viewmodel_changed)
         # Periodic debounce flush (also covers edge cases).
         GLib.timeout_add(50, self._tick_debounce)
@@ -328,8 +330,7 @@ class MixerWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------------
 
     def _on_viewmodel_changed(self, _vm: MixerViewModel) -> None:
-        # Always marshal onto the GTK main loop.
-        GLib.idle_add(self._render, priority=GLib.PRIORITY_DEFAULT_IDLE)
+        self._render_scheduler.schedule()
 
     def _tick_debounce(self) -> bool:
         self._vm.flush_pending()
@@ -342,10 +343,10 @@ class MixerWindow(Adw.ApplicationWindow):
     # Render
     # ------------------------------------------------------------------
 
-    def _render(self) -> bool:
+    def _render(self) -> None:
         if not self._vm.connected:
             self._stack.set_visible_child_name("disconnected")
-            return False
+            return
 
         self._stack.set_visible_child_name("connected")
         max_vol = self._vm.max_volume
@@ -475,4 +476,3 @@ class MixerWindow(Adw.ApplicationWindow):
             )
 
         self._empty_apps.set_visible(len(desired) == 0)
-        return False  # for idle_add: do not repeat
