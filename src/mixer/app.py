@@ -6,7 +6,6 @@ import argparse
 import logging
 import os
 import sys
-from pathlib import Path
 
 import gi
 
@@ -23,6 +22,7 @@ from mixer.ui.window import MixerWindow
 from mixer.util.autostart import is_autostart_enabled, set_autostart_enabled
 from mixer.util.gnome_shortcut import sync_mute_input_shortcut
 from mixer.util.logging import get_logger, setup_logging
+from mixer.util.runtime import mixer_launcher
 from mixer.util.settings import MixerSettings
 from mixer.util.styles import load_app_css
 from mixer.viewmodel.mixer_viewmodel import MixerViewModel
@@ -190,7 +190,7 @@ class MixerApplication(Adw.Application):
             return
         self._settings.start_on_login = enabled
         self._settings.save()
-        os.environ.setdefault("MIXER_EXEC", _detect_mixer_exec())
+        os.environ.setdefault("MIXER_EXEC", mixer_launcher())
         set_autostart_enabled(enabled, minimized=self._settings.start_minimized)
         if self._tray is not None:
             self._tray.set_start_on_login(enabled)
@@ -288,20 +288,10 @@ class MixerApplication(Adw.Application):
         self._settings.start_on_login = enabled
         self._settings.save()
         # Ensure MIXER_EXEC points at our launcher for the desktop file.
-        os.environ.setdefault("MIXER_EXEC", _detect_mixer_exec())
+        os.environ.setdefault("MIXER_EXEC", mixer_launcher())
         set_autostart_enabled(enabled, minimized=self._settings.start_minimized)
         if self._tray is not None:
             self._tray.set_start_on_login(enabled)
-
-
-def _detect_mixer_exec() -> str:
-    argv0 = Path(sys.argv[0]).resolve()
-    if argv0.name == "mixer" and argv0.is_file():
-        return str(argv0)
-    venv = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "mixer"
-    if venv.is_file():
-        return str(venv)
-    return "mixer"
 
 
 def build_backend(use_fake: bool) -> PulseService | FakeBackend:
@@ -342,7 +332,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
-    os.environ["MIXER_EXEC"] = _detect_mixer_exec()
+    os.environ["MIXER_EXEC"] = mixer_launcher()
 
     settings = MixerSettings.load()
     backend = build_backend(use_fake=args.fake)

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from mixer.util.logging import get_logger
+from mixer.util.runtime import mixer_launcher
 
 logger = get_logger("util.autostart")
 
@@ -38,21 +38,7 @@ def is_autostart_enabled() -> bool:
 
 def _resolve_exec() -> str:
     """Best-effort path to the mixer launcher."""
-    # Prefer the running executable when installed via console_scripts.
-    exe = Path(os.environ.get("MIXER_EXEC", "")).expanduser()
-    if exe.is_file() and os.access(exe, os.X_OK):
-        return str(exe)
-
-    candidates = [
-        Path.home() / "mixer" / ".venv" / "bin" / "mixer",
-        Path(__file__).resolve().parents[3] / ".venv" / "bin" / "mixer",
-    ]
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return str(path)
-
-    # Fall back to PATH name.
-    return "mixer"
+    return mixer_launcher()
 
 
 def set_autostart_enabled(enabled: bool, *, minimized: bool = True) -> None:

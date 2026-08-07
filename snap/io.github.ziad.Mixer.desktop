@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Volume Mixer
+Comment=Control per-application and device volume
+Exec=volume-mixer %U
+Icon=io.github.ziad.Mixer
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Settings;
+StartupNotify=true
+Keywords=volume;mixer;audio;pulse;pipewire;

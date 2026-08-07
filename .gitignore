@@ -6,4 +6,9 @@ __pycache__/
 .mypy_cache/
 dist/
 build/
+parts/
+prime/
+stage/
+*.snap
+.snapcraft/
 *.log

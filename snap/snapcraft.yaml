@@ -1,0 +1,65 @@
+name: volume-mixer
+title: Volume Mixer
+adopt-info: volume-mixer
+license: MIT
+base: core24
+grade: stable
+confinement: strict
+
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+
+apps:
+  volume-mixer:
+    command: bin/mixer
+    extensions: [gnome]
+    desktop: usr/share/applications/io.github.ziad.Mixer.desktop
+    common-id: io.github.ziad.Mixer.desktop
+    plugs:
+      - audio-playback
+      - audio-record
+      - home
+      - gsettings
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+
+parts:
+  volume-mixer:
+    plugin: python
+    source: ..
+    python-packages:
+      - pulsectl
+    build-environment:
+      # Avoid conflicts between the python plugin and the GNOME extension.
+      - PYTHONPATH: ""
+    build-packages:
+      - python3-dev
+      - libgirepository-2.0-dev
+      - libcairo2-dev
+      - libgtk-4-dev
+      - libadwaita-1-dev
+      - pkg-config
+    stage-packages:
+      - python3-gi
+      - gir1.2-gtk-4.0
+      - gir1.2-adw-1
+      - libpulse0
+    override-build: |
+      craftctl default
+      install -Dm644 "$CRAFT_PROJECT_DIR/snap/io.github.ziad.Mixer.desktop" \
+        "$CRAFT_PART_INSTALL/usr/share/applications/io.github.ziad.Mixer.desktop"
+      install -Dm644 "$CRAFT_PROJECT_DIR/data/io.github.ziad.Mixer.metainfo.xml" \
+        "$CRAFT_PART_INSTALL/usr/share/metainfo/io.github.ziad.Mixer.metainfo.xml"
+      install -Dm644 "$CRAFT_PROJECT_DIR/data/io.github.ziad.Mixer.svg" \
+        "$CRAFT_PART_INSTALL/usr/share/icons/hicolor/scalable/apps/io.github.ziad.Mixer.svg"
+    parse-info:
+      - usr/share/metainfo/io.github.ziad.Mixer.metainfo.xml
+
+slots:
+  volume-mixer:
+    interface: dbus
+    bus: session
+    name: io.github.ziad.Mixer

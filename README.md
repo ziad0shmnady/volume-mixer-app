@@ -62,17 +62,33 @@ libpulse0
 
 ## Installation
 
-### Option 1 — Build the `.deb` yourself
+### Option 1 — Snap (Ubuntu App Center / Snap Store)
+
+```bash
+sudo snap install volume-mixer
+```
+
+To build the Snap yourself:
+
+```bash
+sudo snap install snapcraft --classic
+sudo snap install lxd --classic && sudo lxd init --auto   # recommended
+./scripts/build-snap.sh
+sudo snap install ./volume-mixer_*.snap --dangerous
+```
+
+See [STORE.md](STORE.md) for publishing to the Snap Store.
+
+### Option 2 — Build the `.deb` yourself
 
 ```bash
 git clone https://github.com/ziad/mixer.git
 cd mixer
 ./scripts/build-deb.sh
+sudo apt install ./dist/volume-mixer_1.0.0_all.deb
 ```
 
-The package is written to `dist/volume-mixer_1.0.0_all.deb`.
-
-### Option 2 — Install from source (development)
+### Option 3 — Install from source (development)
 
 ```bash
 git clone https://github.com/ziad/mixer.git
@@ -192,6 +208,8 @@ src/mixer/
   util/               Settings, autostart, GNOME shortcuts
 data/                 Desktop entry, icon, CSS
 scripts/build-deb.sh  Debian package builder
+scripts/build-snap.sh Snap package builder (Ubuntu Store)
+snap/                 snapcraft.yaml and Snap desktop entry
 tests/                pytest suite
 ```
 
@@ -215,7 +233,8 @@ pytest
 ### Build a release package
 
 ```bash
-./scripts/build-deb.sh
+./scripts/build-deb.sh    # .deb for apt install
+./scripts/build-snap.sh   # .snap for Snap Store
 ```
 
 ---

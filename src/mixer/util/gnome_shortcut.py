@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from gi.repository import Gio, GLib
 
 from mixer.util.logging import get_logger
+from mixer.util.runtime import mixer_command
 
 logger = get_logger("util.gnome_shortcut")
 
@@ -40,17 +40,7 @@ def gnome_shortcuts_available() -> bool:
 
 
 def _resolve_toggle_command() -> str:
-    exe = os.environ.get("MIXER_EXEC", "").strip()
-    if exe:
-        return f"{exe} --toggle-mute"
-    candidates = [
-        Path.home() / "mixer" / ".venv" / "bin" / "mixer",
-        Path(__file__).resolve().parents[3] / ".venv" / "bin" / "mixer",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return f"{path} --toggle-mute"
-    return "mixer --toggle-mute"
+    return mixer_command("--toggle-mute")
 
 
 def sync_mute_input_shortcut(accel: str) -> bool:
