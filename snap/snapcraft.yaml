@@ -6,9 +6,11 @@ base: core24
 grade: stable
 confinement: strict
 
-architectures:
-  - build-on: amd64
-  - build-on: arm64
+platforms:
+  amd64:
+  arm64:
+    build-on: [amd64, arm64]
+    build-for: [arm64]
 
 apps:
   volume-mixer:
@@ -16,6 +18,9 @@ apps:
     extensions: [gnome]
     desktop: usr/share/applications/io.github.ziad.Mixer.desktop
     common-id: io.github.ziad.Mixer.desktop
+    # Lets "Open at Startup" work under confinement: the app writes this file
+    # to $SNAP_USER_DATA/.config/autostart and snapd launches it at login.
+    autostart: io.github.ziad.Mixer.desktop
     plugs:
       - audio-playback
       - audio-record

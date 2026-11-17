@@ -91,3 +91,12 @@
 .mixer-device-card row {
   min-height: 44px;
 }
+
+/* Apps that are connected but not playing right now */
+row.mixer-app-idle .mixer-app-icon {
+  opacity: 0.55;
+}
+
+row.mixer-app-idle box.title {
+  opacity: 0.7;
+}

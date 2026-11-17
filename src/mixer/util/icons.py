@@ -4,9 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
-from mixer.models.audio import StreamInfo
 from mixer.util.stream_names import BINARY_ICON_ALIASES
+
+
+class IconSource(Protocol):
+    """Anything that identifies an app: a StreamInfo, ClientInfo or AppInfo."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def icon_name(self) -> str | None: ...
+    @property
+    def application_id(self) -> str | None: ...
+    @property
+    def process_binary(self) -> str | None: ...
+    @property
+    def snap_id(self) -> str | None: ...
 
 _FALLBACK = "application-x-executable-symbolic"
 _GENERIC_CANDIDATES = (
@@ -28,8 +43,8 @@ _desktop_icon_cache: dict[str, str] | None = None
 _icon_name_cache: dict[tuple[object, ...], str] = {}
 
 
-def candidate_icon_names(stream: StreamInfo) -> list[str]:
-    """Ordered icon theme name candidates for a playback stream."""
+def candidate_icon_names(stream: IconSource) -> list[str]:
+    """Ordered icon theme name candidates for an application."""
     names: list[str] = []
 
     def _add(value: str | None) -> None:
@@ -135,7 +150,7 @@ def _resolve_desktop_icon(*keys: str | None) -> str | None:
     return None
 
 
-def resolve_icon_file(stream: StreamInfo) -> str | None:
+def resolve_icon_file(stream: IconSource) -> str | None:
     """Return an absolute icon file path when theme icons are unavailable."""
     if stream.snap_id:
         snap_icon = _snap_icon_path(stream.snap_id)
@@ -157,9 +172,8 @@ def resolve_icon_file(stream: StreamInfo) -> str | None:
     return None
 
 
-def _stream_icon_cache_key(stream: StreamInfo) -> tuple[object, ...]:
+def _stream_icon_cache_key(stream: IconSource) -> tuple[object, ...]:
     return (
-        stream.index,
         stream.snap_id,
         stream.process_binary,
         stream.name,
@@ -169,7 +183,7 @@ def _stream_icon_cache_key(stream: StreamInfo) -> tuple[object, ...]:
 
 
 def resolve_icon_name(
-    stream: StreamInfo,
+    stream: IconSource,
     has_icon: Callable[[str], bool] | None = None,
 ) -> str:
     """Pick the first icon theme name that exists, or a fallback.

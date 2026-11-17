@@ -12,7 +12,7 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from mixer.ui.channel_row import ChannelRow
+from mixer.ui.app_list import AppList
 from mixer.ui.render_coalesce import CoalescedRenderer
 from mixer.util.logging import get_logger
 from mixer.viewmodel.mixer_viewmodel import MixerViewModel
@@ -40,7 +40,6 @@ class TrayPopup(Gtk.Window):
         self._on_open_mixer = on_open_mixer
         self._on_mute_input = on_mute_input
         self._on_quit = on_quit
-        self._stream_rows: dict[int, ChannelRow] = {}
         self._anchor_x = 0
         self._anchor_y = 0
 
@@ -92,12 +91,15 @@ class TrayPopup(Gtk.Window):
         scrolled.set_max_content_height(_POPUP_MAX_HEIGHT)
         outer.append(scrolled)
 
-        self._apps_group = Adw.PreferencesGroup()
-        self._apps_group.add_css_class("mixer-tray-apps")
-        scrolled.set_child(self._apps_group)
+        self._app_list = AppList(self._vm, compact=True)
+        self._app_list.add_css_class("mixer-tray-apps")
+        self._app_list.set_margin_start(10)
+        self._app_list.set_margin_end(10)
+        self._app_list.set_margin_bottom(6)
+        scrolled.set_child(self._app_list)
 
         self._empty = Gtk.Label(
-            label="No applications are playing audio",
+            label="No applications are using sound",
             justify=Gtk.Justification.CENTER,
         )
         self._empty.add_css_class("mixer-empty-apps")
@@ -213,7 +215,6 @@ class TrayPopup(Gtk.Window):
 
         max_vol = self._vm.max_volume
         sinks = self._vm.sorted_sinks()
-        streams = self._vm.sorted_streams()
 
         source = self._vm.default_source()
         if source is not None:
@@ -224,44 +225,16 @@ class TrayPopup(Gtk.Window):
                 self._mic_btn.set_icon_name("microphone-sensitivity-high-symbolic")
                 self._mic_btn.remove_css_class("error")
 
-        desired = {s.index for s in streams}
-        for index in list(self._stream_rows.keys()):
-            if index not in desired:
-                row = self._stream_rows.pop(index)
-                self._apps_group.remove(row)
-
-        has_icon = Gtk.IconTheme.get_for_display(self.get_display()).has_icon
-
-        for stream in streams:
-            row = self._stream_rows.get(stream.index)
-            if row is None:
-                stream_index = stream.index
-                row = ChannelRow(
-                    title=stream.name,
-                    subtitle=stream.media_name,
-                    volume=stream.volume,
-                    muted=stream.muted,
-                    max_volume=max_vol,
-                    compact=True,
-                    on_mute=lambda muted, idx=stream_index: self._vm.set_mute(
-                        "stream", idx, muted
-                    ),
-                    on_volume=lambda v, idx=stream_index: self._vm.set_volume(
-                        "stream", idx, v
-                    ),
-                )
-                self._stream_rows[stream.index] = row
-                self._apps_group.add(row)
-            row.update_from_stream(
-                stream,
-                sinks=sinks,
-                max_volume=max_vol,
-                has_icon=has_icon,
-            )
-
-        self._empty.set_visible(len(desired) == 0)
-        if len(desired) == 0:
-            self._empty.set_label("No applications are playing audio")
+        apps = self._vm.apps()
+        self._app_list.render(
+            apps,
+            sinks=sinks,
+            max_volume=max_vol,
+            has_icon=Gtk.IconTheme.get_for_display(self.get_display()).has_icon,
+        )
+        self._empty.set_visible(not apps)
+        if not apps:
+            self._empty.set_label("No applications are using sound")
 
 
 def _move_surface(window: Gtk.Window, x: int, y: int) -> None:

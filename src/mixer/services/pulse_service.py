@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
 from typing import Any
 
-from mixer.models.audio import AudioSnapshot, DeviceInfo, StreamInfo, VolumeMath
+from mixer.models.audio import AudioSnapshot, ClientInfo, DeviceInfo, StreamInfo, VolumeMath
 from mixer.services.backend import (
     AudioCommand,
     MoveStream,
@@ -17,7 +18,13 @@ from mixer.services.backend import (
     SnapshotCallback,
 )
 from mixer.util.logging import get_logger
-from mixer.util.stream_names import is_transient_system_stream, resolve_stream_display_name
+from mixer.util.stream_names import (
+    app_identity_key,
+    is_system_client,
+    is_transient_system_stream,
+    resolve_stream_display_name,
+    strip_role_suffix,
+)
 
 import gi
 
@@ -32,6 +39,8 @@ _MAX_BACKOFF = 8.0
 _EVENT_TIMEOUT = 0.15
 # Safety-net poll so streams are not missed if a subscribe event is dropped.
 _SNAPSHOT_POLL_S = 1.5
+# Client name of this app; other running copies are hidden from the app list.
+_MIXER_CLIENT_NAME = "mixer"
 
 
 def _mean_volume(obj: Any) -> float:
@@ -53,10 +62,32 @@ def _prop(props: dict[str, str], *keys: str) -> str | None:
     return None
 
 
+def _proplist(obj: Any) -> dict[str, str]:
+    return dict(getattr(obj, "proplist", {}) or {})
+
+
+def _display_name(props: dict[str, str], fallback: str) -> str:
+    return resolve_stream_display_name(
+        application_name=strip_role_suffix(_prop(props, "application.name")),
+        process_binary=_prop(props, "application.process.binary"),
+        snap_id=_prop(props, "pipewire.snap.id", "snap.id", "application.id"),
+        media_name=_prop(props, "media.name", "media.title") or "",
+        fallback=fallback,
+    )
+
+
+def _icon_hint(props: dict[str, str]) -> str | None:
+    icon_name = _prop(props, "application.icon_name", "window.icon_name")
+    process_binary = _prop(props, "application.process.binary")
+    if icon_name is None and process_binary:
+        icon_name = process_binary.split("/")[-1]
+    return icon_name
+
+
 class PulseService:
     """Owns a single libpulse connection on a dedicated worker thread."""
 
-    def __init__(self, client_name: str = "mixer") -> None:
+    def __init__(self, client_name: str = _MIXER_CLIENT_NAME) -> None:
         self._client_name = client_name
         self._commands: queue.Queue[AudioCommand | object] = queue.Queue()
         self._on_snapshot: SnapshotCallback | None = None
@@ -296,51 +327,76 @@ class PulseService:
             if not source.name.endswith(".monitor")
         )
 
+        client_props: dict[int, dict[str, str]] = {
+            client.index: _proplist(client) for client in pulse.client_list()
+        }
+
         streams: list[StreamInfo] = []
         for si in pulse.sink_input_list():
-            props = dict(getattr(si, "proplist", {}) or {})
+            # Client props (snap id, binary…) first; the stream's own props win.
+            owner_props = client_props.get(getattr(si, "client", None), {})
+            props = {**owner_props, **_proplist(si)}
             if is_transient_system_stream(props):
                 continue
             process_binary = _prop(props, "application.process.binary")
             snap_id = _prop(props, "pipewire.snap.id", "snap.id", "application.id")
-            application_name = _prop(props, "application.name")
             media_name = _prop(props, "media.name", "media.title") or ""
-            name = resolve_stream_display_name(
-                application_name=application_name,
-                process_binary=process_binary,
-                snap_id=snap_id,
-                media_name=media_name,
-                fallback=si.name or f"Stream {si.index}",
-            )
-            icon_name = _prop(props, "application.icon_name", "window.icon_name")
-            if icon_name is None and process_binary:
-                icon_name = process_binary.split("/")[-1]
-            application_id = _prop(props, "application.id")
             streams.append(
                 StreamInfo(
                     index=si.index,
-                    name=name,
+                    name=_display_name(props, si.name or f"Stream {si.index}"),
                     media_name=media_name,
-                    icon_name=icon_name,
+                    icon_name=_icon_hint(props),
                     volume=VolumeMath.clamp(_mean_volume(si)),
                     muted=bool(si.mute),
                     sink_index=int(si.sink),
                     corked=bool(getattr(si, "corked", False)),
-                    application_id=application_id,
+                    application_id=_prop(props, "application.id"),
                     process_binary=process_binary,
                     snap_id=snap_id,
+                    app_key=app_identity_key(props) or "",
                 )
             )
+
+        clients = tuple(self._build_clients(client_props))
 
         return AudioSnapshot(
             sinks=sinks,
             sources=sources,
             streams=tuple(streams),
+            clients=clients,
             default_sink_name=default_sink,
             default_source_name=default_source,
             connected=True,
             generation=self._generation,
         )
+
+    def _build_clients(self, client_props: dict[int, dict[str, str]]) -> list[ClientInfo]:
+        """Apps connected to the sound server, including ones not playing yet."""
+        own_pid = str(os.getpid())
+        clients: list[ClientInfo] = []
+        for index, props in sorted(client_props.items()):
+            if props.get("application.process.id") == own_pid:
+                continue
+            if props.get("application.name") in (self._client_name, _MIXER_CLIENT_NAME):
+                continue  # other running copies of this mixer
+            if is_system_client(props):
+                continue
+            app_key = app_identity_key(props)
+            if app_key is None:
+                continue
+            clients.append(
+                ClientInfo(
+                    index=index,
+                    name=_display_name(props, f"Application {index}"),
+                    app_key=app_key,
+                    icon_name=_icon_hint(props),
+                    application_id=_prop(props, "application.id"),
+                    process_binary=_prop(props, "application.process.binary"),
+                    snap_id=_prop(props, "pipewire.snap.id", "snap.id"),
+                )
+            )
+        return clients
 
 
 class _Wake:

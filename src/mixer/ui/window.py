@@ -11,6 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
+from mixer.ui.app_list import AppList
 from mixer.ui.channel_row import ChannelRow
 from mixer.ui.device_row import DevicePickerRow
 from mixer.ui.render_coalesce import CoalescedRenderer
@@ -44,7 +45,6 @@ class MixerWindow(Adw.ApplicationWindow):
 
         self._vm = viewmodel
         self._settings = settings or MixerSettings.load()
-        self._stream_rows: dict[int, ChannelRow] = {}
         self._sink_row: ChannelRow | None = None
         self._source_row: ChannelRow | None = None
         self._sink_picker: DevicePickerRow | None = None
@@ -195,13 +195,14 @@ class MixerWindow(Adw.ApplicationWindow):
         apps_label.add_css_class("heading")
         self._page.append(apps_label)
 
-        self._apps_group = Adw.PreferencesGroup()
-        self._apps_group.add_css_class("mixer-apps-card")
-        self._page.append(self._apps_group)
+        self._app_list = AppList(self._vm, show_output_picker=True)
+        self._app_list.add_css_class("mixer-apps-card")
+        self._page.append(self._app_list)
 
         self._empty_apps = Gtk.Label(
-            label="No applications are playing audio right now.\n"
-            "Open media in an app (YouTube, Discord call, Spotify…) to control it here."
+            label="No applications are using sound right now.\n"
+            "Apps show up here as soon as they connect to the sound system — "
+            "even before they play anything."
         )
         self._empty_apps.add_css_class("mixer-empty-apps")
         self._empty_apps.set_halign(Gtk.Align.CENTER)
@@ -436,43 +437,12 @@ class MixerWindow(Adw.ApplicationWindow):
                     compact_title="Volume",
                 )
 
-        # Application streams — reuse rows by index
-        desired = {s.index for s in self._vm.sorted_streams()}
-        for index in list(self._stream_rows.keys()):
-            if index not in desired:
-                row = self._stream_rows.pop(index)
-                self._apps_group.remove(row)
-
-        for stream in self._vm.sorted_streams():
-            row = self._stream_rows.get(stream.index)
-            if row is None:
-                stream_index = stream.index
-                row = ChannelRow(
-                    title=stream.name,
-                    subtitle=stream.media_name,
-                    volume=stream.volume,
-                    muted=stream.muted,
-                    max_volume=max_vol,
-                    show_output_picker=True,
-                    sinks=sinks,
-                    current_sink_index=stream.sink_index,
-                    on_mute=lambda muted, idx=stream_index: self._vm.set_mute(
-                        "stream", idx, muted
-                    ),
-                    on_volume=lambda v, idx=stream_index: self._vm.set_volume(
-                        "stream", idx, v
-                    ),
-                    on_output=lambda sink_idx, idx=stream_index: self._vm.move_stream(
-                        idx, sink_idx
-                    ),
-                )
-                self._stream_rows[stream.index] = row
-                self._apps_group.add(row)
-            row.update_from_stream(
-                stream,
-                sinks=sinks,
-                max_volume=max_vol,
-                has_icon=self._has_icon,
-            )
-
-        self._empty_apps.set_visible(len(desired) == 0)
+        # Applications — playing and silent, one row per app
+        apps = self._vm.apps()
+        self._app_list.render(
+            apps,
+            sinks=sinks,
+            max_volume=max_vol,
+            has_icon=self._has_icon,
+        )
+        self._empty_apps.set_visible(not apps)

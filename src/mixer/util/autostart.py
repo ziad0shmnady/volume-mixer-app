@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+import shutil
 from pathlib import Path
 
 from mixer.util.logging import get_logger
@@ -41,6 +43,53 @@ def _resolve_exec() -> str:
     return mixer_launcher()
 
 
+def _exec_line(minimized: bool) -> str:
+    exec_path = _resolve_exec()
+    return f"{exec_path} --background" if minimized else exec_path
+
+
+def _launcher_runnable(exec_path: str) -> bool:
+    """True if login can actually start this command."""
+    if exec_path.startswith("/snap/bin/"):
+        return True  # snapd wrapper; may not resolve from inside confinement
+    if Path(exec_path).is_absolute():
+        return Path(exec_path).is_file()
+    return shutil.which(exec_path) is not None
+
+
+def refresh_autostart_entry(*, minimized: bool = True) -> bool:
+    """Point an enabled autostart entry at the launcher that is running now.
+
+    The entry stores an absolute path; if the app was moved or reinstalled
+    elsewhere it would silently fail at every login. Only the ``Exec=`` line is
+    rewritten so hand-made tweaks (e.g. a start delay) survive. Returns True
+    when the file was changed.
+    """
+    if not is_autostart_enabled():
+        return False
+    exec_line = _exec_line(minimized)
+    if not _launcher_runnable(shlex.split(exec_line)[0]):
+        logger.warning("Not updating autostart: launcher %r not found", exec_line)
+        return False
+    path = autostart_path()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    updated = [f"Exec={exec_line}" if line.startswith("Exec=") else line for line in lines]
+    if not any(line.startswith("Exec=") for line in lines):
+        updated.insert(1, f"Exec={exec_line}")
+    if updated == lines:
+        return False
+    try:
+        path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed to update autostart entry: %s", exc)
+        return False
+    logger.info("Updated autostart entry to run %s", exec_line)
+    return True
+
+
 def set_autostart_enabled(enabled: bool, *, minimized: bool = True) -> None:
     """Create or remove the XDG autostart entry."""
     path = autostart_path()
@@ -53,8 +102,7 @@ def set_autostart_enabled(enabled: bool, *, minimized: bool = True) -> None:
             logger.warning("Failed to remove autostart entry: %s", exc)
         return
 
-    exec_path = _resolve_exec()
-    args = f"{exec_path} --background" if minimized else exec_path
+    args = _exec_line(minimized)
     icon = "io.github.ziad.Mixer"
     content = f"""[Desktop Entry]
 Type=Application

@@ -13,7 +13,9 @@ A native **GTK 4 / libadwaita** volume mixer for Linux. Control output, input, a
 ### Audio control
 - **Output** — master volume, mute, and default playback device
 - **Input** — microphone volume, mute, and default recording device
-- **Applications** — per-app volume sliders, mute, and output routing (move an app to another speaker/headset)
+- **Applications** — every app connected to the sound system gets a row, **even while it's silent** (Discord between calls, a paused browser, Slack…). Per-app volume, mute, and output routing (move an app to another speaker/headset)
+- **Set it before it plays** — change a silent app's volume or mute it, and Mixer applies that the moment the app starts playing (remembered across restarts)
+- **One row per app** — all of an app's streams (e.g. several browser tabs) are grouped and controlled together
 - **Live sync** — changes from other apps (keyboard media keys, Discord, etc.) update instantly
 - **Friendly names** — sensible labels for apps (e.g. Discord instead of `WEBRTC VoiceEngine`)
 

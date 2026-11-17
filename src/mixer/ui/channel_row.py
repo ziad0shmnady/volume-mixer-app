@@ -11,7 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from mixer.models.audio import DeviceInfo, StreamInfo, VolumeMath
+from mixer.models.audio import AppInfo, DeviceInfo, StreamInfo, VolumeMath
 from mixer.util.icons import apply_icon, resolve_icon_name
 
 MuteHandler = Callable[[bool], None]
@@ -35,6 +35,7 @@ class ChannelRow(Adw.ActionRow):
         sinks: tuple[DeviceInfo, ...] = (),
         current_sink_index: int | None = None,
         compact: bool = False,
+        scale_width: int | None = None,
         on_mute: MuteHandler | None = None,
         on_volume: VolumeHandler | None = None,
         on_output: OutputHandler | None = None,
@@ -59,6 +60,7 @@ class ChannelRow(Adw.ActionRow):
         self._icon = Gtk.Image()
         apply_icon(self._icon, icon_name)
         self._icon.set_pixel_size(22)
+        self._icon.add_css_class("mixer-app-icon")
         self.add_prefix(self._icon)
 
         self._mute_btn = Gtk.ToggleButton()
@@ -75,10 +77,14 @@ class ChannelRow(Adw.ActionRow):
             0.01,
         )
         self._scale.set_draw_value(False)
-        self._scale.set_hexpand(True)
         self._scale.set_valign(Gtk.Align.CENTER)
         self._scale.add_css_class("mixer-volume-scale")
-        self._scale.set_size_request(120 if compact else 160, -1)
+        if scale_width is not None:
+            # Fixed width keeps sliders aligned down a list of rows.
+            self._scale.set_size_request(scale_width, -1)
+        else:
+            self._scale.set_hexpand(True)
+            self._scale.set_size_request(120 if compact else 160, -1)
         self._scale.connect("value-changed", self._handle_volume)
         self.add_suffix(self._scale)
 
@@ -176,6 +182,36 @@ class ChannelRow(Adw.ActionRow):
             sinks=sinks,
             current_sink_index=stream.sink_index,
         )
+
+    def update_from_app(
+        self,
+        app: AppInfo,
+        sinks: tuple[DeviceInfo, ...],
+        max_volume: float,
+        has_icon: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Show an application; silent apps stay adjustable but look idle."""
+        self.update_state(
+            title=app.name,
+            subtitle=app.subtitle,
+            icon_name=resolve_icon_name(app, has_icon=has_icon),
+            volume=app.volume,
+            muted=app.muted,
+            max_volume=max_volume,
+            sinks=sinks,
+            current_sink_index=app.sink_index,
+        )
+        if app.active:
+            self.remove_css_class("mixer-app-idle")
+            self._scale.set_tooltip_text(None)
+        else:
+            self.add_css_class("mixer-app-idle")
+            self._scale.set_tooltip_text("Applied when the app starts playing")
+        if self._output_btn is not None:
+            self._output_btn.set_sensitive(app.active)
+            self._output_btn.set_tooltip_text(
+                "Move to output" if app.active else "Available while the app is playing"
+            )
 
     def update_from_device(
         self,

@@ -19,7 +19,11 @@ from mixer.services.pulse_service import PulseService
 from mixer.ui.tray import TrayIcon
 from mixer.ui.tray_popup import TrayPopup
 from mixer.ui.window import MixerWindow
-from mixer.util.autostart import is_autostart_enabled, set_autostart_enabled
+from mixer.util.autostart import (
+    is_autostart_enabled,
+    refresh_autostart_entry,
+    set_autostart_enabled,
+)
 from mixer.util.gnome_shortcut import sync_mute_input_shortcut
 from mixer.util.logging import get_logger, setup_logging
 from mixer.util.runtime import mixer_launcher
@@ -30,6 +34,8 @@ from mixer.viewmodel.mixer_viewmodel import MixerViewModel
 logger = get_logger("app")
 
 APP_ID = "io.github.ziad.Mixer"
+# Coalesce per-app volume saves while a slider is being dragged.
+_APP_VOLUME_SAVE_DELAY_MS = 750
 
 
 class MixerApplication(Adw.Application):
@@ -41,6 +47,7 @@ class MixerApplication(Adw.Application):
         *,
         settings: MixerSettings,
         start_background: bool = False,
+        persist_app_volumes: bool = True,
     ) -> None:
         super().__init__(
             application_id=APP_ID,
@@ -54,6 +61,10 @@ class MixerApplication(Adw.Application):
         self._tray_popup: TrayPopup | None = None
         self._hold_id: int | None = None
         self._audio_started = False
+        self._app_volume_save_id: int | None = None
+        if persist_app_volumes:
+            viewmodel.app_preferences.update(settings.app_volumes)
+            viewmodel.on_app_preferences_changed = self._schedule_app_volume_save
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:  # noqa: N802
         args = command_line.get_arguments()[1:]
@@ -84,6 +95,9 @@ class MixerApplication(Adw.Application):
         self._window.present()
 
     def do_shutdown(self) -> None:  # noqa: N802 - GTK override
+        if self._app_volume_save_id is not None:
+            GLib.source_remove(self._app_volume_save_id)
+            self._save_app_volumes()
         if self._tray is not None:
             self._tray.stop()
             self._tray = None
@@ -92,6 +106,18 @@ class MixerApplication(Adw.Application):
         except Exception:  # noqa: BLE001
             logger.exception("Error stopping view-model")
         Adw.Application.do_shutdown(self)
+
+    def _schedule_app_volume_save(self) -> None:
+        if self._app_volume_save_id is None:
+            self._app_volume_save_id = GLib.timeout_add(
+                _APP_VOLUME_SAVE_DELAY_MS, self._save_app_volumes
+            )
+
+    def _save_app_volumes(self) -> bool:
+        self._app_volume_save_id = None
+        self._settings.app_volumes = dict(self._viewmodel.app_preferences)
+        self._settings.save()
+        return False
 
     def _install_app_actions(self) -> None:
         quit_action = Gio.SimpleAction.new("quit", None)
@@ -110,10 +136,15 @@ class MixerApplication(Adw.Application):
         tray.connect("change-state", self._on_toggle_tray)
         self.add_action(tray)
 
-        # Sync autostart flag with the actual file if present.
-        if is_autostart_enabled() and not self._settings.start_on_login:
-            self._settings.start_on_login = True
+        # The autostart file is the source of truth: it can also be toggled
+        # from GNOME's "Startup Applications" / Tweaks.
+        autostart_on = is_autostart_enabled()
+        if autostart_on != self._settings.start_on_login:
+            self._settings.start_on_login = autostart_on
             self._settings.save()
+        if autostart_on:
+            # Repair entries left pointing at an old install location.
+            refresh_autostart_entry(minimized=self._settings.start_minimized)
 
         autostart = Gio.SimpleAction.new_stateful(
             "start-on-login",
@@ -341,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
         viewmodel,
         settings=settings,
         start_background=args.background,
+        # Fake app keys look like real ones; don't let --fake overwrite them.
+        persist_app_volumes=not args.fake,
     )
 
     return app.run(argv if argv is not None else sys.argv)

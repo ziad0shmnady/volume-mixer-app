@@ -38,7 +38,76 @@ _BINARY_DISPLAY_NAMES: dict[str, str] = {
     "mpv": "mpv",
     "rhythmbox": "Rhythmbox",
     "firefox-bin": "Firefox",
+    "google-chrome": "Google Chrome",
+    "brave": "Brave",
+    "brave-browser": "Brave",
+    "msedge": "Microsoft Edge",
+    "microsoft-edge": "Microsoft Edge",
+    "claude-desktop": "Claude",
+    "whatsapp-desktop-linux": "WhatsApp",
+    "whatsapp-for-linux": "WhatsApp",
+    "signal-desktop": "Signal",
+    "thunderbird": "Thunderbird",
+    "audacity": "Audacity",
+    "totem": "Videos",
 }
+
+# Binaries that host many unrelated apps; those are told apart by app name.
+_GENERIC_RUNTIMES = frozenset(
+    {
+        "java",
+        "node",
+        "nodejs",
+        "electron",
+        "mono",
+        "dotnet",
+        "gjs",
+        "bwrap",
+        "sh",
+        "bash",
+        "perl",
+        "ruby",
+    }
+)
+_GENERIC_RUNTIME_PREFIXES = ("python", "wine", "electron", "qemu-system")
+
+# Suffixes apps add to their name for secondary connections (mic capture etc.).
+_ROLE_SUFFIXES = (" input", " output", " capture", "_capture", "_hardware_mute")
+
+# Sound-server plumbing and desktop shells: connected, but not "apps".
+_SYSTEM_CLIENT_BINARIES = frozenset(
+    {
+        "wireplumber",
+        "pipewire",
+        "pipewire-pulse",
+        "pulseaudio",
+        "gnome-shell",
+        "gnome-control-center",
+        "pactl",
+        "pacmd",
+        "pavucontrol",
+        "pwvucontrol",
+        "pw-cli",
+        "pw-dump",
+        "pw-top",
+        "wpctl",
+        "plasmashell",
+        "kded5",
+        "kded6",
+        "kmix",
+        "cinnamon",
+        "xfce4-panel",
+    }
+)
+_SYSTEM_CLIENT_BINARY_PREFIXES = ("gsd-", "xdg-desktop-portal")
+_SYSTEM_CLIENT_NAMES = frozenset(
+    {
+        "libcanberra",
+        "mutter",
+        "gnome shell volume control",
+        "gnome volume control media keys",
+    }
+)
 
 # Extra icon theme names to try for a process binary.
 BINARY_ICON_ALIASES: dict[str, tuple[str, ...]] = {
@@ -94,6 +163,67 @@ def resolve_stream_display_name(
         return media_name.strip()
 
     return fallback
+
+
+def strip_role_suffix(name: str | None) -> str:
+    """``"Google Chrome input"`` -> ``"Google Chrome"``, ``"discord_capture"`` -> ``"discord"``."""
+    value = (name or "").strip()
+    lowered = value.casefold()
+    for suffix in _ROLE_SUFFIXES:
+        if lowered.endswith(suffix) and len(value) > len(suffix):
+            return value[: -len(suffix)].strip()
+    return value
+
+
+def _is_generic_runtime(binary: str) -> bool:
+    return binary in _GENERIC_RUNTIMES or binary.startswith(_GENERIC_RUNTIME_PREFIXES)
+
+
+def _binary_base(props: dict[str, str]) -> str:
+    return _norm((props.get("application.process.binary") or "").split("/")[-1])
+
+
+def app_identity_key(props: dict[str, str]) -> str | None:
+    """Stable key shared by every stream and client of one application.
+
+    Apps open several connections (Discord: voice engine, capture, hardware
+    mute; Chrome: playback + "Google Chrome input"), so the key is based on
+    the sandbox id or process binary rather than ``application.name``.
+    """
+    snap = _norm(props.get("pipewire.snap.id") or props.get("snap.id"))
+    if snap:
+        return f"snap:{snap}"
+    flatpak = _norm(props.get("pipewire.access.portal.app_id"))
+    if flatpak:
+        return f"flatpak:{flatpak}"
+    binary = _binary_base(props)
+    app = _norm(strip_role_suffix(props.get("application.name")))
+    if binary and not _is_generic_runtime(binary):
+        return f"bin:{binary}"
+    if binary and app:
+        return f"bin:{binary}/{app}"
+    if app:
+        return f"app:{app}"
+    if binary:
+        return f"bin:{binary}"
+    return None
+
+
+def known_app_name(*candidates: str | None) -> str | None:
+    """Curated display name for a binary or snap id, if we have one."""
+    for value in candidates:
+        key = _norm((value or "").split("/")[-1])
+        if key and key in _BINARY_DISPLAY_NAMES:
+            return _BINARY_DISPLAY_NAMES[key]
+    return None
+
+
+def is_system_client(props: dict[str, str]) -> bool:
+    """True for sound-server daemons, the desktop shell and volume tools."""
+    binary = _binary_base(props)
+    if binary in _SYSTEM_CLIENT_BINARIES or binary.startswith(_SYSTEM_CLIENT_BINARY_PREFIXES):
+        return True
+    return _norm(props.get("application.name")) in _SYSTEM_CLIENT_NAMES
 
 
 def is_transient_system_stream(props: dict[str, str]) -> bool:

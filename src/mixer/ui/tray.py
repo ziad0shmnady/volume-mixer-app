@@ -114,6 +114,9 @@ DBUSMENU_XML = """
 """
 
 
+_WATCHER_NAME = "org.kde.StatusNotifierWatcher"
+
+
 class TrayIcon:
     """Session-bus StatusNotifierItem with a small DBusMenu."""
 
@@ -145,6 +148,8 @@ class TrayIcon:
         self._menu_reg: int | None = None
         self._bus_name: str | None = None
         self._own_name_id: int | None = None
+        self._watcher_watch_id: int | None = None
+        self._registered = False
 
     def start(self) -> bool:
         """Export the tray item. Returns False if the watcher is unavailable."""
@@ -182,15 +187,39 @@ class TrayIcon:
             None,
         )
 
-        if not self._register_with_watcher():
-            logger.warning("StatusNotifierWatcher not available — tray icon disabled")
-            self.stop()
-            return False
-
-        logger.info("Tray icon registered as %s", self._bus_name)
+        # Register whenever the tray host appears. At login the AppIndicator
+        # extension may not be up yet when we autostart, and GNOME Shell
+        # restarts drop every registered item; watching covers both.
+        self._watcher_watch_id = Gio.bus_watch_name_on_connection(
+            self._connection,
+            _WATCHER_NAME,
+            Gio.BusNameWatcherFlags.NONE,
+            self._on_watcher_appeared,
+            self._on_watcher_vanished,
+        )
         return True
 
+    def _on_watcher_appeared(self, *_args: object) -> None:
+        if self._connection is None:
+            return
+        if self._register_with_watcher():
+            self._registered = True
+            logger.info("Tray icon registered as %s", self._bus_name)
+        else:
+            logger.warning("Tray host present but registration failed")
+
+    def _on_watcher_vanished(self, *_args: object) -> None:
+        if self._registered:
+            logger.info("Tray host went away; will re-register when it returns")
+        else:
+            logger.info("Waiting for a tray host (AppIndicator extension)…")
+        self._registered = False
+
     def stop(self) -> None:
+        if self._watcher_watch_id is not None:
+            Gio.bus_unwatch_name(self._watcher_watch_id)
+            self._watcher_watch_id = None
+        self._registered = False
         if self._connection is None:
             return
         if self._sni_reg is not None:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from dataclasses import replace
+from typing import Any
 
-from mixer.models.audio import AudioSnapshot, DeviceInfo, StreamInfo, VolumeMath
+from mixer.models.audio import AudioSnapshot, ClientInfo, DeviceInfo, StreamInfo, VolumeMath
 from mixer.services.backend import (
     AudioCommand,
     MoveStream,
@@ -60,6 +63,7 @@ def default_snapshot() -> AudioSnapshot:
             corked=False,
             application_id="google-chrome",
             process_binary="chrome",
+            app_key="bin:chrome",
         ),
         StreamInfo(
             index=101,
@@ -72,12 +76,28 @@ def default_snapshot() -> AudioSnapshot:
             corked=False,
             application_id="firefox",
             process_binary="firefox",
+            app_key="bin:firefox",
         ),
+    )
+    clients = (
+        ClientInfo(index=50, name="Google Chrome", app_key="bin:chrome", process_binary="chrome"),
+        ClientInfo(index=51, name="Firefox", app_key="bin:firefox", process_binary="firefox"),
+        # Connected but silent: shown as idle apps.
+        ClientInfo(
+            index=52,
+            name="Discord",
+            app_key="snap:discord",
+            icon_name="discord",
+            process_binary="Discord",
+            snap_id="discord",
+        ),
+        ClientInfo(index=53, name="Slack", app_key="bin:slack", icon_name="slack", process_binary="slack"),
     )
     return AudioSnapshot(
         sinks=sinks,
         sources=sources,
         streams=streams,
+        clients=clients,
         default_sink_name="alsa_output.speakers",
         default_source_name="alsa_input.mic",
         connected=True,
@@ -144,16 +164,7 @@ class FakeBackend:
                     generation=self._generation,
                 )
             else:
-                base = default_snapshot()
-                self._snapshot = AudioSnapshot(
-                    sinks=base.sinks,
-                    sources=base.sources,
-                    streams=base.streams,
-                    default_sink_name=base.default_sink_name,
-                    default_source_name=base.default_source_name,
-                    connected=True,
-                    generation=self._generation,
-                )
+                self._snapshot = replace(default_snapshot(), generation=self._generation)
             snap = self._snapshot
             callback = self._on_snapshot
         if callback is not None:
@@ -163,15 +174,7 @@ class FakeBackend:
         """Replace the current snapshot and notify listeners."""
         with self._lock:
             self._generation += 1
-            self._snapshot = AudioSnapshot(
-                sinks=snapshot.sinks,
-                sources=snapshot.sources,
-                streams=snapshot.streams,
-                default_sink_name=snapshot.default_sink_name,
-                default_source_name=snapshot.default_source_name,
-                connected=snapshot.connected,
-                generation=self._generation,
-            )
+            self._snapshot = replace(snapshot, generation=self._generation)
             snap = self._snapshot
             callback = self._on_snapshot
         if callback is not None:
@@ -186,213 +189,54 @@ class FakeBackend:
         snap = self._snapshot
 
         if isinstance(command, SetVolume):
-            snap = self._map_volume(snap, command)
-        elif isinstance(command, SetMute):
-            snap = self._map_mute(snap, command)
-        elif isinstance(command, MoveStream):
-            streams = tuple(
-                StreamInfo(
-                    index=s.index,
-                    name=s.name,
-                    media_name=s.media_name,
-                    icon_name=s.icon_name,
-                    volume=s.volume,
-                    muted=s.muted,
-                    sink_index=command.sink_index if s.index == command.stream_index else s.sink_index,
-                    corked=s.corked,
-                    application_id=s.application_id,
-                    process_binary=s.process_binary,
-                )
-                for s in snap.streams
+            volume = VolumeMath.clamp(command.volume)
+            snap = self._map_target(
+                snap, command.target, command.index, lambda obj: replace(obj, volume=volume)
             )
-            snap = AudioSnapshot(
-                sinks=snap.sinks,
-                sources=snap.sources,
-                streams=streams,
-                default_sink_name=snap.default_sink_name,
-                default_source_name=snap.default_source_name,
-                connected=snap.connected,
-                generation=self._generation,
+        elif isinstance(command, SetMute):
+            snap = self._map_target(
+                snap, command.target, command.index, lambda obj: replace(obj, muted=command.muted)
+            )
+        elif isinstance(command, MoveStream):
+            snap = self._map_target(
+                snap,
+                "stream",
+                command.stream_index,
+                lambda obj: replace(obj, sink_index=command.sink_index),
             )
         elif isinstance(command, SetDefaultDevice):
             if command.kind == "sink":
-                sinks = tuple(
-                    DeviceInfo(
-                        index=d.index,
-                        name=d.name,
-                        description=d.description,
-                        volume=d.volume,
-                        muted=d.muted,
-                        is_default=(d.name == command.name),
-                    )
-                    for d in snap.sinks
-                )
-                snap = AudioSnapshot(
-                    sinks=sinks,
-                    sources=snap.sources,
-                    streams=snap.streams,
+                snap = replace(
+                    snap,
+                    sinks=tuple(replace(d, is_default=(d.name == command.name)) for d in snap.sinks),
                     default_sink_name=command.name,
-                    default_source_name=snap.default_source_name,
-                    connected=snap.connected,
-                    generation=self._generation,
                 )
             else:
-                sources = tuple(
-                    DeviceInfo(
-                        index=d.index,
-                        name=d.name,
-                        description=d.description,
-                        volume=d.volume,
-                        muted=d.muted,
-                        is_default=(d.name == command.name),
-                    )
-                    for d in snap.sources
-                )
-                snap = AudioSnapshot(
-                    sinks=snap.sinks,
-                    sources=sources,
-                    streams=snap.streams,
-                    default_sink_name=snap.default_sink_name,
+                snap = replace(
+                    snap,
+                    sources=tuple(
+                        replace(d, is_default=(d.name == command.name)) for d in snap.sources
+                    ),
                     default_source_name=command.name,
-                    connected=snap.connected,
-                    generation=self._generation,
                 )
 
-        self._snapshot = snap
+        self._snapshot = replace(snap, generation=self._generation)
 
-    def _map_volume(self, snap: AudioSnapshot, command: SetVolume) -> AudioSnapshot:
-        volume = VolumeMath.clamp(command.volume)
-        if command.target == "sink":
-            sinks = tuple(
-                DeviceInfo(
-                    index=d.index,
-                    name=d.name,
-                    description=d.description,
-                    volume=volume if d.index == command.index else d.volume,
-                    muted=d.muted,
-                    is_default=d.is_default,
-                )
-                for d in snap.sinks
+    @staticmethod
+    def _map_target(
+        snap: AudioSnapshot,
+        target: str,
+        index: int,
+        update: Callable[[Any], Any],
+    ) -> AudioSnapshot:
+        if target == "sink":
+            return replace(
+                snap, sinks=tuple(update(d) if d.index == index else d for d in snap.sinks)
             )
-            return AudioSnapshot(
-                sinks=sinks,
-                sources=snap.sources,
-                streams=snap.streams,
-                default_sink_name=snap.default_sink_name,
-                default_source_name=snap.default_source_name,
-                connected=snap.connected,
-                generation=self._generation,
+        if target == "source":
+            return replace(
+                snap, sources=tuple(update(d) if d.index == index else d for d in snap.sources)
             )
-        if command.target == "source":
-            sources = tuple(
-                DeviceInfo(
-                    index=d.index,
-                    name=d.name,
-                    description=d.description,
-                    volume=volume if d.index == command.index else d.volume,
-                    muted=d.muted,
-                    is_default=d.is_default,
-                )
-                for d in snap.sources
-            )
-            return AudioSnapshot(
-                sinks=snap.sinks,
-                sources=sources,
-                streams=snap.streams,
-                default_sink_name=snap.default_sink_name,
-                default_source_name=snap.default_source_name,
-                connected=snap.connected,
-                generation=self._generation,
-            )
-        streams = tuple(
-            StreamInfo(
-                index=s.index,
-                name=s.name,
-                media_name=s.media_name,
-                icon_name=s.icon_name,
-                volume=volume if s.index == command.index else s.volume,
-                muted=s.muted,
-                sink_index=s.sink_index,
-                corked=s.corked,
-                application_id=s.application_id,
-                process_binary=s.process_binary,
-            )
-            for s in snap.streams
-        )
-        return AudioSnapshot(
-            sinks=snap.sinks,
-            sources=snap.sources,
-            streams=streams,
-            default_sink_name=snap.default_sink_name,
-            default_source_name=snap.default_source_name,
-            connected=snap.connected,
-            generation=self._generation,
-        )
-
-    def _map_mute(self, snap: AudioSnapshot, command: SetMute) -> AudioSnapshot:
-        if command.target == "sink":
-            sinks = tuple(
-                DeviceInfo(
-                    index=d.index,
-                    name=d.name,
-                    description=d.description,
-                    volume=d.volume,
-                    muted=command.muted if d.index == command.index else d.muted,
-                    is_default=d.is_default,
-                )
-                for d in snap.sinks
-            )
-            return AudioSnapshot(
-                sinks=sinks,
-                sources=snap.sources,
-                streams=snap.streams,
-                default_sink_name=snap.default_sink_name,
-                default_source_name=snap.default_source_name,
-                connected=snap.connected,
-                generation=self._generation,
-            )
-        if command.target == "source":
-            sources = tuple(
-                DeviceInfo(
-                    index=d.index,
-                    name=d.name,
-                    description=d.description,
-                    volume=d.volume,
-                    muted=command.muted if d.index == command.index else d.muted,
-                    is_default=d.is_default,
-                )
-                for d in snap.sources
-            )
-            return AudioSnapshot(
-                sinks=snap.sinks,
-                sources=sources,
-                streams=snap.streams,
-                default_sink_name=snap.default_sink_name,
-                default_source_name=snap.default_source_name,
-                connected=snap.connected,
-                generation=self._generation,
-            )
-        streams = tuple(
-            StreamInfo(
-                index=s.index,
-                name=s.name,
-                media_name=s.media_name,
-                icon_name=s.icon_name,
-                volume=s.volume,
-                muted=command.muted if s.index == command.index else s.muted,
-                sink_index=s.sink_index,
-                corked=s.corked,
-                application_id=s.application_id,
-                process_binary=s.process_binary,
-            )
-            for s in snap.streams
-        )
-        return AudioSnapshot(
-            sinks=snap.sinks,
-            sources=snap.sources,
-            streams=streams,
-            default_sink_name=snap.default_sink_name,
-            default_source_name=snap.default_source_name,
-            connected=snap.connected,
-            generation=self._generation,
+        return replace(
+            snap, streams=tuple(update(s) if s.index == index else s for s in snap.streams)
         )

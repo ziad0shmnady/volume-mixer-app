@@ -50,3 +50,44 @@ def test_default_settings() -> None:
     assert settings.show_tray is True
     assert settings.start_on_login is False
     assert settings.start_minimized is True
+
+
+def test_app_volumes_roundtrip(tmp_path: Path) -> None:
+    from mixer.models.audio import AppPreference
+
+    path = tmp_path / "settings.json"
+    MixerSettings(
+        app_volumes={
+            "snap:discord": AppPreference(volume=0.4, muted=True),
+            "bin:chrome": AppPreference(volume=0.75, muted=False),
+        }
+    ).save(path)
+    loaded = MixerSettings.load(path)
+    assert loaded.app_volumes == {
+        "snap:discord": AppPreference(volume=0.4, muted=True),
+        "bin:chrome": AppPreference(volume=0.75, muted=False),
+    }
+
+
+def test_app_volumes_invalid_entries_dropped(tmp_path: Path) -> None:
+    import json
+
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "app_volumes": {
+                    "bin:ok": {"volume": 9, "muted": "yes"},
+                    "bin:bad-volume": {"volume": "loud"},
+                    "bin:bool-volume": {"volume": True},
+                    "bin:not-a-dict": 0.5,
+                    "": {"volume": 0.5},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = MixerSettings.load(path)
+    assert list(loaded.app_volumes) == ["bin:ok"]
+    assert loaded.app_volumes["bin:ok"].volume == 1.5  # clamped
+    assert loaded.app_volumes["bin:ok"].muted is False
